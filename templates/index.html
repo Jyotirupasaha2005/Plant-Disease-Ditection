@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantCare AI - Disease Classification</title>
+    <!-- Google Fonts for Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-animation">
+        <div class="shape shape-1"></div>
+        <div class="shape shape-2"></div>
+        <div class="shape shape-3"></div>
+    </div>
+
+    <div class="glass-container">
+        <header>
+            <div class="logo">
+                <i class="fa-solid fa-leaf"></i>
+                <h1>PlantCare <span>AI</span></h1>
+            </div>
+            <p class="subtitle">Advanced plant disease detection powered by MobileNetV2</p>
+        </header>
+
+        <main>
+            <div class="upload-section" id="drop-zone">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <input type="file" id="file-input" name="file" accept="image/*" hidden>
+                    <div class="upload-content">
+                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                        <h3>Drag & Drop your plant image here</h3>
+                        <p>or</p>
+                        <button type="button" class="btn primary-btn" id="browse-btn">Browse Files</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="preview-section hidden" id="preview-section">
+                <div class="image-wrapper">
+                    <img id="image-preview" src="#" alt="Plant preview">
+                    <div class="scan-line"></div>
+                </div>
+                <button type="button" class="btn secondary-btn" id="analyze-btn">
+                    <i class="fa-solid fa-microscope"></i> Analyze Image
+                </button>
+                <button type="button" class="btn text-btn" id="reset-btn">Upload Different Image</button>
+            </div>
+
+            <div class="result-section hidden" id="result-section">
+                <div class="result-card">
+                    <h4>Analysis Result</h4>
+                    <div class="disease-name" id="disease-name">Processing...</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidence-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="confidence-text">Confidence: <span id="confidence-val">0%</span></div>
+                </div>
+            </div>
+
+            <div class="loader-section hidden" id="loader-section">
+                <div class="spinner"></div>
+                <p>Analyzing leaf patterns...</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Model architecture: MobileNetV2 | Classes: 38</p>
+        </footer>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const browseBtn = document.getElementById('browse-btn');
+        const previewSection = document.getElementById('preview-section');
+        const imagePreview = document.getElementById('image-preview');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const resultSection = document.getElementById('result-section');
+        const loaderSection = document.getElementById('loader-section');
+        const diseaseName = document.getElementById('disease-name');
+        const confidenceVal = document.getElementById('confidence-val');
+        const confidenceFill = document.getElementById('confidence-fill');
+
+        let currentFile = null;
+
+        // Browse files
+        browseBtn.addEventListener('click', () => fileInput.click());
+
+        // File Selection
+        fileInput.addEventListener('change', handleFile);
+
+        // Drag and drop events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropZone.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropZone.classList.remove('highlight');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                fileInput.files = files;
+                handleFile({ target: fileInput });
+            }
+        }
+
+        function handleFile(e) {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                currentFile = file;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    dropZone.classList.add('hidden');
+                    previewSection.classList.remove('hidden');
+                    resultSection.classList.add('hidden');
+                    
+                    // Reset analysis button
+                    const scanLine = document.querySelector('.scan-line');
+                    scanLine.style.display = 'none';
+                    scanLine.style.animation = 'none';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                alert("Please select a valid image file.");
+            }
+        }
+
+        resetBtn.addEventListener('click', () => {
+            currentFile = null;
+            fileInput.value = '';
+            dropZone.classList.remove('hidden');
+            previewSection.classList.add('hidden');
+            resultSection.classList.add('hidden');
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            if (!currentFile) return;
+
+            // UI updates
+            analyzeBtn.disabled = true;
+            resetBtn.disabled = true;
+            const scanLine = document.querySelector('.scan-line');
+            scanLine.style.display = 'block';
+            scanLine.style.animation = 'scan 2s linear infinite';
+            
+            loaderSection.classList.remove('hidden');
+            resultSection.classList.add('hidden');
+
+            const formData = new FormData();
+            formData.append('file', currentFile);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult(data.prediction, data.confidence);
+                } else {
+                    showResult("Error: " + (data.error || "Failed to analyze"), "0%");
+                    diseaseName.style.color = "#ff4d4d";
+                }
+            } catch (error) {
+                showResult("Connection Error", "0%");
+                diseaseName.style.color = "#ff4d4d";
+            } finally {
+                analyzeBtn.disabled = false;
+                resetBtn.disabled = false;
+                scanLine.style.animation = 'none';
+                scanLine.style.display = 'none';
+                loaderSection.classList.add('hidden');
+            }
+        });
+
+        function showResult(prediction, confidence) {
+            diseaseName.textContent = prediction;
+            diseaseName.style.color = prediction.includes("Healthy") ? "#4CAF50" : "#E1BEE7";
+            
+            confidenceVal.textContent = confidence;
+            
+            // Animation for confidence bar
+            setTimeout(() => {
+                confidenceFill.style.width = confidence;
+                
+                // Color based on confidence level
+                const confValue = parseFloat(confidence);
+                if (confValue > 85) {
+                    confidenceFill.style.background = 'linear-gradient(90deg, #4CAF50, #81C784)';
+                } else if (confValue > 60) {
+                    confidenceFill.style.background = 'linear-gradient(90deg, #FFC107, #FFD54F)';
+                } else {
+                    confidenceFill.style.background = 'linear-gradient(90deg, #F44336, #E57373)';
+                }
+            }, 100);
+            
+            resultSection.classList.remove('hidden');
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+    </script>
+</body>
+</html>
